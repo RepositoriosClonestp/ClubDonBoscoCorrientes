@@ -1,0 +1,75 @@
+name: CI — Python
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.10, 3.11, 3.12]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies (requirements.txt o poetry)
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          elif [ -f "pyproject.toml" ]; then
+            python -m pip install --upgrade poetry
+            # evitar crear virtualenvs separados dentro del runner
+            poetry config virtualenvs.create false
+            poetry install --no-interaction --no-ansi
+          else
+            echo "No se detectó requirements.txt ni pyproject.toml — omitiendo instalación de deps"
+          fi
+
+      - name: Run linter (ruff)
+        run: |
+          python -m pip install ruff
+          # fallar si hay errores de lint; si prefieres solo advertencias cambia 'ruff check' por 'ruff check || true'
+          ruff check .
+
+      - name: Run tests (pytest)
+        run: |
+          python -m pip install pytest
+          pytest -q
+
+  publish:
+    name: Publish to PyPI (on tag)
+    needs: test
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Build distribution
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.6.4
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
